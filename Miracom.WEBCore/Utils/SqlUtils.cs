@@ -5,7 +5,9 @@ namespace ASP_Entity_Freamwork_Study.Utils
 {
     public class SqlUtils
     {
-        private static string connectionString = "Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=192.168.99.143)(PORT=1522))(CONNECT_DATA=(SERVICE_NAME=MESDB)));User Id=XX001;Password=G01-XX01;";
+        //   private static string connectionString = "Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=192.168.99.143)(PORT=1522))(CONNECT_DATA=(SERVICE_NAME=MESDB)));User Id=XX001;Password=G01-XX01;";
+
+        private static string connectionString = ConfigHelper.GetMesConnectionString();
         public static DataTable SelectData(string sql)
         {
             
