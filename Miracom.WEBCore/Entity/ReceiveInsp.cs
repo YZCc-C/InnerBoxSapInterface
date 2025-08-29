@@ -34,7 +34,7 @@
         /*
          * 内盒号
          */
-        public string boxId { get; set; }
+        public List<string> boxId { get; set; }
         /*
          * 子批次号
          */
@@ -46,6 +46,14 @@
         /*
          * 预计出货时间
          */
-        public string expectShipTime { get; set; }  
+        public string expectShipTime { get; set; }
+
+        public string GetBoxIdForSql()
+        {
+            return (boxId == null || boxId.Count == 0)
+                ? string.Empty
+                : string.Join(",", boxId.Select(b => $"'{b}'"));
+        }
+
     }
 }

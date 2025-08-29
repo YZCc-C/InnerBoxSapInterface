@@ -367,7 +367,7 @@ namespace Miracom.WEBCore.Service.impl
         private Result GenerateByInBoxId(ReceiveInsp shipInsp)
         {
             Result result = new Result();
-            string boxId = shipInsp.boxId;
+            string boxId = shipInsp.boxId[0];
             string getQtySql = $"SELECT T2.STANDARD_QTY FROM ( SELECT BOX_ID , MAT_ID  FROM MESMGR.CTAPOBXSTS GROUP BY MAT_ID , BOX_ID ) T1 LEFT JOIN MESMGR.MTAPMATLBL T2 ON T1.MAT_ID = T2.MAT_ID WHERE T1.BOX_ID = '{boxId}' AND T2.OUTBOX_FLAG = 'Y' GROUP BY T2.STANDARD_QTY  ";
             System.Data.DataTable dtQty = SqlUtils.SelectData(getQtySql);
             if (dtQty.Rows.Count == 0)
@@ -379,7 +379,7 @@ namespace Miracom.WEBCore.Service.impl
             // 一个外箱最多装几个内盒
             boxQty = int.Parse(dtQty.Rows[0][0].ToString());
             // 查出内盒库中所有符合条件的内盒
-            string param = $"T2.BOX_ID = '{boxId}'";
+            string param = $"T2.BOX_ID IN ({shipInsp.GetBoxIdForSql().Trim()})";
             inboxSql = inboxSql.Replace("?", param);
             System.Data.DataTable dtBox = SqlUtils.SelectData(inboxSql);
 
