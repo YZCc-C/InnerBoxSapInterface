@@ -10,6 +10,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics.Arm;
 using System.Text;
 using System.Text.RegularExpressions;
+using static Miracom.WEBCore.Service.impl.ReceiveShipInspServiceImpl;
 using static System.Runtime.CompilerServices.RuntimeHelpers;
 
 namespace Miracom.WEBCore.Service.impl
@@ -20,12 +21,13 @@ namespace Miracom.WEBCore.Service.impl
         private DataTable mergeBoxRules = new DataTable(); // 并箱规则集合
         private DataRow firstBox; // 首箱
         private HashSet<string> dateCodes = new HashSet<string>(); // DateCode数量
+        private HashSet<string> dateCodes2 = new HashSet<string>(); // DateCode数量
         private HashSet<string> waferLots = new HashSet<string>();// 晶圆批次数量
         private HashSet<string> lblLots = new HashSet<string>();// 标签批次数量
         private HashSet<string> cgwDateCodes = new HashSet<string>();// 标签批次数量
         private HashSet<string> marks = new HashSet<string>();// Mark栏位数量
-
-        private Dictionary<string,DataTable> lotPoInfo = new Dictionary<string,DataTable>(); // 获取多批次，和对应的Po
+        private HashSet<string> mos = new HashSet<string>();//MO数量
+        private Dictionary<string, DataTable> lotPoInfo = new Dictionary<string, DataTable>(); // 获取多批次，和对应的Po
         private Dictionary<string, bool> isFang = new Dictionary<string, bool>(); // 判断数量类型的规则时，通过批次看放不放的进去
         int currentQty = 0; // 出的数量
         int boxQty = 0; // // 
@@ -77,7 +79,7 @@ namespace Miracom.WEBCore.Service.impl
                 }
 
                 DataTable dt = (DataTable)result.data;
-                OperationDb(result,receiveInsp,dt);
+                OperationDb(result, receiveInsp, dt);
                 result.data = null;
             }
             catch (Exception ex) {
@@ -392,6 +394,27 @@ namespace Miracom.WEBCore.Service.impl
 
             // 通过并向规则过滤出所有能用的内盒
             DataTable dtBoxFifer = FifterByRuleToOther(dtBox, boxQty, shipInsp);
+
+            //判断是否全部符合条件 有不符合条件的不成功
+            List<string> boxIdList = shipInsp.boxId;
+
+            var boxIds = dtBoxFifer.AsEnumerable()
+                       .Select(r => r.Field<string>("BOX_ID"))
+                       .Where(id => !string.IsNullOrEmpty(id) && !id.Equals("空箱"))
+                       .ToList();
+
+            if (!CheckEmptyBoxOnlyAtEnd(dtBoxFifer)) {
+                result.code = 500;
+                result.message = "不满足最后一个为尾箱";
+                return result;
+            }
+            if (boxIdList.Count != boxIds.Count ) {
+                result.code = 500;
+                result.message = "当前内盒库中有不符合条件的内盒";
+                return result;
+            }
+
+
             if (dtBoxFifer == null)
             {
                 result.code = 500;
@@ -489,7 +512,7 @@ namespace Miracom.WEBCore.Service.impl
                 // 1.根据LOT查
                 mergeBoxRules = SqlUtils.SelectData($"SELECT T2.RULE_ID ,T1.STEP ,T2.CUSTOMIZATION ,T2.DATA_SOURCE ,T2.RULE_TYPE ,T2.SYMBOL ,T1.VALUE  FROM MESMGR.MERGEBOXRULE T1 LEFT JOIN MESMGR.MERGEBOXRULESETTING T2 ON T1.RULE_ID  = T2.RULE_ID  WHERE MAP_ID = '{row["LOT_ID"].ToString()}' AND t1.STEP LIKE '%Carton%' AND T1.TYPE='LOT' ORDER BY RULE_TYPE DESC");
                 // 2.根据PO查
-                if(mergeBoxRules == null || mergeBoxRules.Rows.Count == 0)
+                if (mergeBoxRules == null || mergeBoxRules.Rows.Count == 0)
                 {
                     mergeBoxRules = SqlUtils.SelectData($"SELECT T2.RULE_ID ,T1.STEP ,T2.CUSTOMIZATION ,T2.DATA_SOURCE ,T2.RULE_TYPE ,T2.SYMBOL ,T1.VALUE  FROM MESMGR.MERGEBOXRULE T1 LEFT JOIN MESMGR.MERGEBOXRULESETTING T2 ON T1.RULE_ID  = T2.RULE_ID  WHERE MAP_ID = '{row["PO_NO"].ToString()}' AND t1.STEP LIKE '%Carton%' AND T1.TYPE='PO' ORDER BY RULE_TYPE DESC");
                 }
@@ -530,7 +553,7 @@ namespace Miracom.WEBCore.Service.impl
                         DataTable dtPo = SqlUtils.SelectData($"SELECT ORDER_ID  FROM MESMGR.MWIPLOTSTS WHERE LOT_ID = '{lot}'");
                         dr["PO_NO"] = dtPo.Rows[0]["ORDER_ID"].ToString();
                         dtMergeLots.Rows.Add(dr);
-                        GetFromIdByLot(lot,dtMergeLots);      
+                        GetFromIdByLot(lot, dtMergeLots);
                     }
                     lotPoInfo.Add(row["LOT_ID2"].ToString(), dtMergeLots);
                 }
@@ -1341,7 +1364,7 @@ namespace Miracom.WEBCore.Service.impl
                     return SameMarkOneRow(addBox[3].ToString());
                     break;
                 case "MMC":
-                    return MaxMarkValue(max,addBox);
+                    return MaxMarkValue(max, addBox);
                     break;
                 case "MWL":
                     return MaxWaferIdValue(max, addBox);
@@ -1351,12 +1374,20 @@ namespace Miracom.WEBCore.Service.impl
                     break;
                 case "MD2":
                     return MaxDCValue2(max, addBox);
+                case "SD1":
+                    return MaxDCValue3(max, addBox, "SD1");
+                case "SD2":
+                    return MaxDCValue3(max, addBox, "SD2");
                     break;
                 case "MLQ":
                     return MaxLotQtyValue(max, addBox);
+                case "MMO":
+                    return MaxMoValue(max, addBox);
                     break;
                 case "SBD":
                     return SameBDDaring(addBox[3].ToString());
+                case "SBM":
+                    return SameBondedManualCode(addBox[3].ToString());
                     break;
                 case "SMN":
                     return SameMarkRule(addBox[3].ToString());
@@ -1364,8 +1395,15 @@ namespace Miracom.WEBCore.Service.impl
                 case "STP":
                     return SameTestProgram(addBox[0].ToString());
                     break;
+                case "SG3":
+                    return SameTestProgramLast(addBox[0].ToString());
+                    break;
                 case "SLT":
                     return SameLotType(addBox[0].ToString());
+                case "DMO":
+                    return SameMOUpDown(addBox[3].ToString());
+
+
                     break;
             }
 
@@ -1770,7 +1808,7 @@ namespace Miracom.WEBCore.Service.impl
         #endregion
 
         #region 最大DC数量不超过2个（Mark栏位信息）
-        private bool MaxDCValue2(int maxValue,DataRow addBox)
+        private bool MaxDCValue2(int maxValue, DataRow addBox)
         {
             string lot2 = addBox["LOT_ID2"].ToString();
             if (isFang.ContainsKey(lot2))
@@ -1818,6 +1856,43 @@ namespace Miracom.WEBCore.Service.impl
         }
         #endregion
 
+
+        #region 最大DC间隔不超过Value个
+        private bool MaxDCValue3(int maxValue, DataRow addBox, string rule)
+        {
+            string lot2 = addBox["LOT_ID2"].ToString();
+            if (isFang.ContainsKey(lot2))
+            {
+                return isFang[lot2];
+            }
+
+            HashSet<string> temp = new HashSet<string>(dateCodes2);
+            foreach (DataRow dtLot in lotPoInfo[addBox["LOT_ID2"].ToString()].Rows)
+            {
+                string addPoNo = dtLot["PO_NO"].ToString();
+                string dateCode = "2421";
+                if (rule.Equals("SD1")) {
+                    var table_ZLOT = GetDBBy10_5_Excel(addPoNo);
+                    dateCode = table_ZLOT.Rows.Count != 0 ? table_ZLOT.Rows[0]["Define46"].ToString() : "";
+                } else {
+
+                    dateCode = lot2.Substring(4, 4);
+                }
+
+                dateCodes2.Add(dateCode);
+            }
+
+            if (IsOverWeeks(dateCodes2, maxValue))
+            {
+                dateCodes2 = temp;
+                isFang.Add(lot2, false);
+                return false;
+            }
+            isFang.Add(lot2, true);
+            return true;
+        }
+        #endregion
+
         #region 最大LOT数量不超过2个（标签批号信息）
 
         private bool MaxLotQtyValue(int maxValue, DataRow addBox)
@@ -1850,6 +1925,34 @@ namespace Miracom.WEBCore.Service.impl
 
         #endregion
 
+
+        #region 最大MO数量不超过Value个
+        private bool MaxMoValue(int maxValue, DataRow addBox)
+        {
+            string lot2 = addBox["LOT_ID2"].ToString();
+            if (isFang.ContainsKey(lot2))
+            {
+                return isFang[lot2];
+            }
+            HashSet<string> temp = new HashSet<string>(mos);
+
+            foreach (DataRow dtLot in lotPoInfo[addBox["LOT_ID2"].ToString()].Rows)
+            {
+                string addPoNo = dtLot["PO_NO"].ToString();
+                mos.Add(addPoNo);
+                if (mos.Count > maxValue)
+                {
+                    mos = temp;
+                    isFang.Add(lot2, false);
+                    return false;
+                }
+
+            }
+            isFang.Add(lot2, true);
+            return true;
+        }
+        #endregion
+
         #region 相同的BD图纸
 
         private bool SameBDDaring(string addPoNo)
@@ -1875,6 +1978,33 @@ namespace Miracom.WEBCore.Service.impl
         }
 
         #endregion
+
+        #region 相同保税手册编码
+
+        private bool SameBondedManualCode(string addPoNo)
+        {
+            if (firstBox != null)
+            {
+                string fristPoNo = firstBox[3].ToString();
+                if (fristPoNo.Equals(addPoNo))
+                {
+                    return true;
+                }
+                var table_ZLOTF = GetDBBy10_5_Excel(fristPoNo);
+                var table_ZLOTA = GetDBBy10_5_Excel(addPoNo);
+                string BMF = table_ZLOTF.Rows.Count != 0 ? table_ZLOTF.Rows[0]["Define57"].ToString() : "";
+                string BMA = table_ZLOTA.Rows.Count != 0 ? table_ZLOTA.Rows[0]["Define57"].ToString() : "";
+                if (!BMF.Equals(BMA))
+                {
+                    return false;
+                }
+                return true;
+            }
+            return true;
+        }
+
+        #endregion
+
 
         #region 相同的印字规范
 
@@ -1920,9 +2050,9 @@ namespace Miracom.WEBCore.Service.impl
                 //var table_ZLOTA = GetDBBy10_5_Excel(addPoNo);
                 //string TESTF = table_ZLOTF.Rows.Count != 0 ? table_ZLOTF.Rows[0]["Define42"].ToString() : "";
                 //string TESTA = table_ZLOTA.Rows.Count != 0 ? table_ZLOTA.Rows[0]["Define42"].ToString() : "";
-                Task<string> TESTF = GetReceiptData(fristPoNo);
-                Task<string> TESTA = GetReceiptData(addPoNo);
-                if (!TESTF.Result.Equals(TESTA.Result))
+                string TESTF = GetRecipe(fristPoNo);
+                string TESTA = GetRecipe(addPoNo);
+                if (!TESTF.Equals(TESTA))
                 {
                     return false;
                 }
@@ -1930,7 +2060,40 @@ namespace Miracom.WEBCore.Service.impl
             }
             return true;
         }
+        #endregion
 
+        #region 相同的测试程序后三位
+
+        private bool SameTestProgramLast(string addPoNo)
+        {
+            if (firstBox != null)
+            {
+                string fristPoNo = firstBox[0].ToString();
+                if (fristPoNo.Equals(addPoNo))
+                {
+                    return true;
+                }
+                //var table_ZLOTF = GetDBBy10_5_Excel(fristPoNo);
+                //var table_ZLOTA = GetDBBy10_5_Excel(addPoNo);
+                //string TESTF = table_ZLOTF.Rows.Count != 0 ? table_ZLOTF.Rows[0]["Define42"].ToString() : "";
+                //string TESTA = table_ZLOTA.Rows.Count != 0 ? table_ZLOTA.Rows[0]["Define42"].ToString() : "";
+
+                string TESTF = GetRecipe(fristPoNo);
+                string lastF3 = !string.IsNullOrEmpty(TESTF) && TESTF.Length >= 3
+                    ? TESTF.Substring(TESTF.Length - 3)
+                    : "";
+                string TESTA = GetRecipe(addPoNo);
+                string lastA3 = !string.IsNullOrEmpty(TESTA) && TESTA.Length >= 3
+                    ? TESTF.Substring(TESTF.Length - 3)
+                    : "";
+                if (!lastF3.Equals(lastA3))
+                {
+                    return false;
+                }
+                return true;
+            }
+            return true;
+        }
         #endregion
 
         #region 相同的LOT TYPE
@@ -1956,6 +2119,32 @@ namespace Miracom.WEBCore.Service.impl
         }
 
         #endregion
+
+        #region 俩个MO首尾相连
+
+        private bool SameMOUpDown(string addPoNo)
+        {
+            if (firstBox != null)
+            {
+                string fristPoNo = firstBox[3].ToString();
+                if (fristPoNo.Equals(addPoNo))
+                {
+                    return true;
+                }
+                string querySql = $"SELECT LOT_ID FROM MWIPLOTSTS WHERE ORDER_ID = '{fristPoNo}' AND LOT_DEL_FLAG != 'Y' AND LENGTH(LOT_ID) > 14 AND FACTORY != 'FGS_NB'  AND LOT_ID NOT LIKE '%DB%'";
+                DataTable dt = SqlUtils.SelectData(querySql);
+                if (dt.Rows.Count > 1)
+                {
+                    return false;
+                }
+                return true;
+            }
+            return true;
+        }
+
+        #endregion
+
+
 
         #endregion
 
@@ -2009,15 +2198,38 @@ namespace Miracom.WEBCore.Service.impl
                 string Recipe = jasonData["FT_Data"][0]["Recipe"].ToString();
 
                 return Recipe;
-                
+
             }
             catch (Exception ex)
             {
                 return "";
             }
-            
+
         }
         #endregion
+
+        public string GetRecipe(string lotId) {
+
+            string testReice = null;
+            string currentLot = lotId;
+            while (!string.IsNullOrEmpty(currentLot))
+            {
+                // 先查当前批
+                string sql = $"SELECT TEST_PROGRAM_NAME FROM TEST_PROGRAM_OPERATION_HIST@TMSDb WHERE LOT_ID = '{currentLot}' AND OPER_ID = 'FT1'";
+                DataTable dtRecipe = SqlUtils.SelectData(sql);
+
+                testReice = dtRecipe.Rows[0][0].ToString();
+                if (!string.IsNullOrEmpty(testReice))
+                    break;
+
+                // 没找到，查它的母批
+                string sql2 = $"SELECT FROM_TO_LOT_ID FROM MWIPLOTSPL WHERE LOT_ID = '{currentLot}' AND FROM_TO_FLAG = 'T'";
+                DataTable dtFromLot = SqlUtils.SelectData(sql);
+                currentLot = dtFromLot.Rows[0][0].ToString();
+            }
+
+            return testReice;
+        }
 
         #region 获取Bin别
         public static string GetBinGradeByLotId(string LotId, string customerId, string matId, bool binType)
@@ -2039,8 +2251,8 @@ namespace Miracom.WEBCore.Service.impl
             {
                 binGrade = "HBIN1";
             }
-           /* string queryBinGradeByCustomer = $"SELECT DATA_1 FROM MGCMTBLDAT WHERE TABLE_NAME='BIN_LABEL_RELATION' AND FACTORY='TEST_NB' AND KEY_1='{customerId}' AND KEY_2='{binGrade}'";
-            string customerBinGrade = SqlUtils.SelectData(queryBinGradeByCustomer).Rows.Count == 0 ? "" : SqlUtils.SelectData(queryBinGradeByCustomer).Rows[0][0].ToString();*/
+            /* string queryBinGradeByCustomer = $"SELECT DATA_1 FROM MGCMTBLDAT WHERE TABLE_NAME='BIN_LABEL_RELATION' AND FACTORY='TEST_NB' AND KEY_1='{customerId}' AND KEY_2='{binGrade}'";
+             string customerBinGrade = SqlUtils.SelectData(queryBinGradeByCustomer).Rows.Count == 0 ? "" : SqlUtils.SelectData(queryBinGradeByCustomer).Rows[0][0].ToString();*/
             return binGrade;
 
             #endregion
@@ -2074,7 +2286,7 @@ namespace Miracom.WEBCore.Service.impl
                         break;
                 }
                 DataTable dtCustid = SqlUtils.SelectData(sql);
-                if(dtCustid.Rows.Count == 0)
+                if (dtCustid.Rows.Count == 0)
                 {
                     return null;
                 }
@@ -2086,7 +2298,7 @@ namespace Miracom.WEBCore.Service.impl
         #endregion
 
         #region 获取合批
-        public void GetFromIdByLot(string lot,DataTable dtMergeLots)
+        public void GetFromIdByLot(string lot, DataTable dtMergeLots)
         {
 
             string queryFromLotId = "SELECT H.LOT_ID AS LOT_ID, H.ORDER_ID AS PO_NO " +
@@ -2100,7 +2312,7 @@ namespace Miracom.WEBCore.Service.impl
                 "AND H.FROM_TO_FLAG = 'F' " +
                 $"AND SUBSTR(H.LOT_ID,0,14) != SUBSTR('{lot}',0,14) " +
                 $"AND T1.LOT_ID='{lot}'";
-                           
+
             DataTable fromLotList = SqlUtils.SelectData(queryFromLotId);
 
             if (fromLotList != null || fromLotList.Rows.Count != 0)
@@ -2108,10 +2320,10 @@ namespace Miracom.WEBCore.Service.impl
                 foreach (DataRow dr in fromLotList.Rows)
                 {
                     dtMergeLots.Rows.Add(dr.ItemArray);
-                    this.GetFromIdByLot(dr["LOT_ID"].ToString(),dtMergeLots);
+                    this.GetFromIdByLot(dr["LOT_ID"].ToString(), dtMergeLots);
                 }
             }
-            return ;
+            return;
         }
         #endregion
 
@@ -2144,5 +2356,63 @@ namespace Miracom.WEBCore.Service.impl
         }
 
         #endregion
+
+        public static bool IsOverWeeks(HashSet<string> dateCodes, int maxValue)
+        {
+            if (dateCodes == null || dateCodes.Count < 2)
+                return false; // 不足2个日期码无法比较
+
+            // 转换为整数
+            List<int> dcList = dateCodes
+                .Where(dc => int.TryParse(dc, out _))
+                .Select(int.Parse)
+                .ToList();
+
+            int minDC = dcList.Min();
+            int maxDC = dcList.Max();
+
+            // 解析年份与周次
+            int minYear = minDC / 100;
+            int minWeek = minDC % 100;
+            int maxYear = maxDC / 100;
+            int maxWeek = maxDC % 100;
+
+            // 转换为连续周数（考虑年份跨度）
+            int minTotalWeeks = minYear * 52 + minWeek;
+            int maxTotalWeeks = maxYear * 52 + maxWeek;
+
+            int weekDiff = maxTotalWeeks - minTotalWeeks;
+
+            return weekDiff > maxValue;
+        }
+
+        public bool CheckEmptyBoxOnlyAtEnd(DataTable dt)
+        {
+            if (dt == null || dt.Rows.Count == 0)
+                return true; // 没数据视为通过
+
+            bool seenEmpty = false;
+
+            foreach (DataRow row in dt.Rows)
+            {
+                string boxId = row["BOX_ID"]?.ToString()?.Trim();
+
+                if (boxId == "空箱")
+                {
+                    seenEmpty = true;
+                }
+                else
+                {
+                    // 如果之前出现过空箱，现在又出现实盒 ⇒ 不合法
+                    if (seenEmpty)
+                        return false;
+                }
+            }
+
+            return true; // 合法：空箱只出现在末尾
+        }
+    
     }
+
+
 }
