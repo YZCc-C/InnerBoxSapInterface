@@ -66,7 +66,7 @@ namespace Miracom.WEBCore.Service.impl
                     case 3: // 指定 MO号清线
                         result = GenerateByMoNo(receiveInsp);
                         break;
-                    case 4: // 指定 sub_lot 或内盒号
+                    case 4: // 指定 sub_lot 或内盒号  
                         result = GenerateBySubLot(receiveInsp);
                         break;
                     case 5:
@@ -82,7 +82,8 @@ namespace Miracom.WEBCore.Service.impl
                 OperationDb(result, receiveInsp, dt);
                 result.data = null;
             }
-            catch (Exception ex) {
+            catch (Exception ex)
+            {
                 Console.WriteLine(ex.ToString());
                 result.code = 500;
                 result.message = "失败";
@@ -95,7 +96,8 @@ namespace Miracom.WEBCore.Service.impl
         #region 做数据库操作
         private async void OperationDb(Result result, ReceiveInsp receiveInsp, DataTable dt)
         {
-            await Task.Run(() => {
+            await Task.Run(() =>
+            {
 
                 if (result.code == 200)
                 {
@@ -368,6 +370,7 @@ namespace Miracom.WEBCore.Service.impl
         #region 指令类型 5 指定内盒号
         private Result GenerateByInBoxId(ReceiveInsp shipInsp)
         {
+            shipInsp.boxId.Reverse();
             Result result = new Result();
             string boxId = shipInsp.boxId[0];
             string getQtySql = $"SELECT T2.STANDARD_QTY FROM ( SELECT BOX_ID , MAT_ID  FROM MESMGR.CTAPOBXSTS GROUP BY MAT_ID , BOX_ID ) T1 LEFT JOIN MESMGR.MTAPMATLBL T2 ON T1.MAT_ID = T2.MAT_ID WHERE T1.BOX_ID = '{boxId}' AND T2.OUTBOX_FLAG = 'Y' GROUP BY T2.STANDARD_QTY  ";
@@ -403,12 +406,14 @@ namespace Miracom.WEBCore.Service.impl
                        .Where(id => !string.IsNullOrEmpty(id) && !id.Equals("空箱"))
                        .ToList();
 
-            if (!CheckEmptyBoxOnlyAtEnd(dtBoxFifer)) {
-                result.code = 500;
-                result.message = "不满足最后一个为尾箱";
-                return result;
-            }
-            if (boxIdList.Count != boxIds.Count ) {
+            //if (!CheckEmptyBoxOnlyAtEnd(dtBoxFifer))
+            //{
+            //    result.code = 500;
+            //    result.message = "不满足最后一个为尾箱";
+            //    return result;
+            //}
+            if (boxIdList.Count != boxIds.Count)
+            {
                 result.code = 500;
                 result.message = "当前内盒库中有不符合条件的内盒";
                 return result;
@@ -1305,7 +1310,8 @@ namespace Miracom.WEBCore.Service.impl
         #region 过滤
         public bool MergeBoxFor(DataRow addBox, ReceiveInsp shipInsp)
         {
-            foreach (DataRow rule in mergeBoxRules.Rows) {
+            foreach (DataRow rule in mergeBoxRules.Rows)
+            {
                 if (!MergeBoxCheck(rule, addBox, shipInsp))
                 {
                     return false;
@@ -1871,10 +1877,13 @@ namespace Miracom.WEBCore.Service.impl
             {
                 string addPoNo = dtLot["PO_NO"].ToString();
                 string dateCode = "2421";
-                if (rule.Equals("SD1")) {
+                if (rule.Equals("SD1"))
+                {
                     var table_ZLOT = GetDBBy10_5_Excel(addPoNo);
                     dateCode = table_ZLOT.Rows.Count != 0 ? table_ZLOT.Rows[0]["Define46"].ToString() : "";
-                } else {
+                }
+                else
+                {
 
                     dateCode = lot2.Substring(4, 4);
                 }
@@ -1932,7 +1941,8 @@ namespace Miracom.WEBCore.Service.impl
             string lot2 = addBox["LOT_ID2"].ToString();
             if (isFang.ContainsKey(lot2))
             {
-                return isFang[lot2];
+                var a = isFang[lot2];
+                return true;
             }
             HashSet<string> temp = new HashSet<string>(mos);
 
@@ -2084,7 +2094,7 @@ namespace Miracom.WEBCore.Service.impl
                     : "";
                 string TESTA = GetRecipe(addPoNo);
                 string lastA3 = !string.IsNullOrEmpty(TESTA) && TESTA.Length >= 3
-                    ? TESTF.Substring(TESTF.Length - 3)
+                    ? TESTA.Substring(TESTA.Length - 3)
                     : "";
                 if (!lastF3.Equals(lastA3))
                 {
@@ -2208,7 +2218,8 @@ namespace Miracom.WEBCore.Service.impl
         }
         #endregion
 
-        public string GetRecipe(string lotId) {
+        public string GetRecipe(string lotId)
+        {
 
             string testReice = null;
             string currentLot = lotId;
@@ -2217,15 +2228,26 @@ namespace Miracom.WEBCore.Service.impl
                 // 先查当前批
                 string sql = $"SELECT TEST_PROGRAM_NAME FROM TEST_PROGRAM_OPERATION_HIST@TMSDb WHERE LOT_ID = '{currentLot}' AND OPER_ID = 'FT1'";
                 DataTable dtRecipe = SqlUtils.SelectData(sql);
+                if (dtRecipe.Rows.Count == 0)
+                {
 
-                testReice = dtRecipe.Rows[0][0].ToString();
-                if (!string.IsNullOrEmpty(testReice))
-                    break;
-
-                // 没找到，查它的母批
-                string sql2 = $"SELECT FROM_TO_LOT_ID FROM MWIPLOTSPL WHERE LOT_ID = '{currentLot}' AND FROM_TO_FLAG = 'T'";
-                DataTable dtFromLot = SqlUtils.SelectData(sql);
-                currentLot = dtFromLot.Rows[0][0].ToString();
+                    // 没找到，查它的母批
+                    string sql2 = $"SELECT FROM_TO_LOT_ID FROM MWIPLOTSPL WHERE LOT_ID = '{currentLot}' AND FROM_TO_FLAG = 'T'";
+                    DataTable dtFromLot = SqlUtils.SelectData(sql);
+                    if (dtFromLot.Rows.Count != 0)
+                    {
+                        currentLot = dtFromLot.Rows[0][0].ToString();
+                    }
+                    else
+                    {
+                        return testReice;
+                    }
+                }
+                else
+                {
+                    testReice = dtRecipe.Rows[0][0].ToString();
+                    return testReice;
+                }
             }
 
             return testReice;
@@ -2337,6 +2359,7 @@ namespace Miracom.WEBCore.Service.impl
             lblLots.Clear();
             cgwDateCodes.Clear();
             isFang.Clear();
+            mos.Clear();
         }
 
         private void AllClear()
@@ -2353,6 +2376,7 @@ namespace Miracom.WEBCore.Service.impl
             deptBoxs.Clear();
             flagRuleType = false;
             maxQty = 0;
+            mos.Clear();
         }
 
         #endregion
@@ -2411,7 +2435,7 @@ namespace Miracom.WEBCore.Service.impl
 
             return true; // 合法：空箱只出现在末尾
         }
-    
+
     }
 
 
